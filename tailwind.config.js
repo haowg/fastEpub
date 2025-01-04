@@ -1,9 +1,10 @@
-/** @type {import('tailwindcss').Config} */
 module.exports = {
-  mode: "all",
-  content: ["./src/**/*.{rs,html,css}", "./dist/**/*.html"],
+  content: [
+    "./src/**/*.{rs,jsx,tsx,html}",
+    "./src/**/*.rs", // Ensure Rust files are included
+  ],
   theme: {
     extend: {},
   },
   plugins: [],
-};
+}

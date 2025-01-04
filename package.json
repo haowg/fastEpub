@@ -1,0 +1,19 @@
+{
+  "name": "smart_reader",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build:css": "tailwindcss build ./src/assets/tailwind.css -o ./src/assets/style.css",
+    "watch:css": "tailwindcss build ./src/assets/tailwind.css -o ./src/assets/style.css --watch"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.14",
+    "postcss": "^8.4.21",
+    "tailwindcss": "^3.4.17"
+  },
+  "description": "Your new bare-bones project includes minimal organization with a single `main.rs` file and a few assets.",
+  "main": "tailwind.config.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

@@ -1,38 +1,34 @@
+#![allow(non_snake_case)]
 use dioxus::prelude::*;
+use dioxus::document::Title;
+use dioxus::desktop::{Config, WindowBuilder};
+use dioxus::document::Stylesheet;
 
-const FAVICON: Asset = asset!("/assets/favicon.ico");
-const MAIN_CSS: Asset = asset!("/assets/main.css");
-const HEADER_SVG: Asset = asset!("/assets/header.svg");
-const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
+mod components;
+use components::Header;
+use components::EpubReader;
 
 fn main() {
-    dioxus::launch(App);
+    dioxus::LaunchBuilder::desktop()
+        .with_cfg(Config::new().with_window(
+            WindowBuilder::new()
+                .with_resizable(true)
+                .with_decorations(false) // Disable native window decorations
+                .with_title("Smart Reader")
+        ))
+        .launch(App)
 }
 
 #[component]
 fn App() -> Element {
     rsx! {
-        document::Link { rel: "icon", href: FAVICON }
-        document::Link { rel: "stylesheet", href: MAIN_CSS }
-        document::Link { rel: "stylesheet", href: TAILWIND_CSS }
-        Hero {}
-    }
-}
-
-#[component]
-pub fn Hero() -> Element {
-    rsx! {
-        div {
-            id: "hero",
-            img { src: HEADER_SVG, id: "header" }
-            div { id: "links",
-                a { href: "https://dioxuslabs.com/learn/0.6/", "📚 Learn Dioxus" }
-                a { href: "https://dioxuslabs.com/awesome", "🚀 Awesome Dioxus" }
-                a { href: "https://github.com/dioxus-community/", "📡 Community Libraries" }
-                a { href: "https://github.com/DioxusLabs/sdk", "⚙️ Dioxus Development Kit" }
-                a { href: "https://marketplace.visualstudio.com/items?itemName=DioxusLabs.dioxus", "💫 VSCode Extension" }
-                a { href: "https://discord.gg/XgGxMSkvUM", "👋 Community Discord" }
-            }
+        Title { "Smart Reader" }
+        Stylesheet { href: asset!("src/assets/style.css") }
+        Stylesheet { href: asset!("assets/mystyle.css") }
+        div { 
+            class: "flex flex-col h-screen",
+            Header {}
+            EpubReader {}
         }
     }
 }
