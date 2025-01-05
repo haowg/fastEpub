@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use epub::doc::EpubDoc;
 use epub::doc::NavPoint;
 use std::sync::{Arc, Mutex};
+use std::collections::HashSet;
 
 #[derive(Debug)]
 struct BookState {
@@ -77,6 +78,7 @@ pub fn EpubReader(current_file: Signal<String>) -> Element {
     let mut is_resizing = use_signal(|| false);
     let mut preview_width = use_signal(|| 192.0);
     let mut show_preview = use_signal(|| false);
+    let mut collapsed_nodes = use_signal(|| HashSet::new()); // 添加折叠状态管理
 
     let on_mouse_down = move |e: Event<MouseData>| {
         is_resizing.set(true);
@@ -151,7 +153,15 @@ pub fn EpubReader(current_file: Signal<String>) -> Element {
         }
     };
 
-
+    // 添加折叠切换处理函数
+    let mut toggle_collapse = move |idx: String| {
+        let mut nodes = collapsed_nodes.write();
+        if nodes.contains(&idx) {
+            nodes.remove(&idx);
+        } else {
+            nodes.insert(idx);
+        }
+    };
 
     rsx! {
         div {
@@ -183,8 +193,10 @@ pub fn EpubReader(current_file: Signal<String>) -> Element {
                 // 目录
                 div {
                     {book_state.read().toc.clone().into_iter().enumerate().map(|(idx, entry)| {
-                        // 从路径映射获取实际章节索引
                         let chapter_index = resolve_chapter_index(&entry.content, &book_state.read().path_to_chapter);
+                        let has_children = !entry.children.is_empty();
+                        let node_id = idx.to_string();
+                        let is_collapsed = collapsed_nodes.read().contains(&node_id);
                         
                         let class_name = match chapter_index {
                             Some(ci) if ci == *current_chapter.read() => "flex-1 block cursor-pointer text-left py-1 text-blue-700",
@@ -193,17 +205,33 @@ pub fn EpubReader(current_file: Signal<String>) -> Element {
                         
                         rsx! {
                             div {
-                                class: "{class_name}",
-                                key: "{idx}",
-                                onclick: move |_| {
-                                    if let Some(ci) = chapter_index {
-                                        goto_chapter(ci);
+                                class: "flex items-center",
+                                // 添加折叠图标
+                                if has_children {
+                                    button {
+                                        class: "w-4 text-gray-500 hover:text-gray-700 focus:outline-none",
+                                        onclick: move |_| toggle_collapse(node_id.clone()),
+                                        span {
+                                            class: "inline-block transform transition-transform",
+                                            style: if is_collapsed { "" } else { "transform: rotate(90deg)" },
+                                            "▶"
+                                        }
                                     }
-                                },
-                                "{entry.label}"
+                                }
+                                div {
+                                    class: "{class_name}",
+                                    key: "{idx}",
+                                    onclick: move |_| {
+                                        if let Some(ci) = chapter_index {
+                                            goto_chapter(ci);
+                                        }
+                                    },
+                                    "{entry.label}"
+                                }
                             }
 
-                            if !entry.children.is_empty() {
+                            // 子节点渲染
+                            if has_children && !is_collapsed {
                                 div {
                                     class: "pl-4",
                                     {entry.children.clone().into_iter().enumerate().map(|(child_idx, child)| {
