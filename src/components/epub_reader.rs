@@ -58,7 +58,7 @@ fn resolve_chapter_index(
 }
 
 #[component]
-pub fn EpubReader() -> Element {
+pub fn EpubReader(current_file: Signal<String>) -> Element {
     let mut book_state = use_signal(|| BookState {
         chapters: Vec::new(),
         metadata: BookMetadata {
@@ -77,7 +77,6 @@ pub fn EpubReader() -> Element {
     let mut is_resizing = use_signal(|| false);
     let mut preview_width = use_signal(|| 192.0);
     let mut show_preview = use_signal(|| false);
-    let mut current_file = use_signal(|| String::from("/home/hwg/Calibre 书库/Ban Du/Can Ming (81)/Can Ming - Ban Du.epub"));
 
     let on_mouse_down = move |e: Event<MouseData>| {
         is_resizing.set(true);
@@ -109,11 +108,13 @@ pub fn EpubReader() -> Element {
         }
     };
 
-    // 修改初始化加载电子书的逻辑
+    // 只保留这一个 use_effect，并改进其逻辑
     use_effect(move || {
-        if book_state.read().chapters.is_empty() {
-            match load_epub(current_file.read().as_str(), book_state.clone()) {
-                Ok(_) => (),
+        let file_path = current_file.read().to_string();
+        if (!file_path.is_empty() && file_path.ends_with(".epub")) {
+            current_chapter.set(0); // 重置章节索引
+            match load_epub(&file_path, book_state.clone()) {
+                Ok(_) => load_error.set(None),
                 Err(e) => load_error.set(Some(e.to_string())),
             }
         }

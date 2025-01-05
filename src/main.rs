@@ -21,14 +21,16 @@ fn main() {
 
 #[component]
 fn App() -> Element {
+    let current_file = use_signal(|| String::new());
+
     rsx! {
         Title { "Smart Reader" }
         Stylesheet { href: asset!("src/assets/style.css") }
         Stylesheet { href: asset!("assets/mystyle.css") }
         div { 
             class: "flex flex-col h-screen",
-            Header {}
-            EpubReader {}
+            Header { current_file: current_file }
+            EpubReader { current_file: current_file }
         }
     }
 }

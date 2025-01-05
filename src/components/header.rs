@@ -4,7 +4,7 @@ use rfd::FileDialog;
 use global_attributes::class;
 
 #[component]
-pub fn Header() -> Element {
+pub fn Header(current_file: Signal<String>) -> Element {
     let mut fullscreen = use_signal(|| false);
     let mut dropdown_open = use_signal(|| false);
 
@@ -22,8 +22,9 @@ pub fn Header() -> Element {
             .set_directory("/")
             .pick_file() 
         {
-            println!("Selected file: {:?}", file);
-            // TODO: 处理文件打开逻辑
+            if let Some(path) = file.to_str() {
+                current_file.set(path.to_string());
+            }
         }
         dropdown_open.set(false);
     };
