@@ -119,7 +119,7 @@ pub fn Header(current_file: Signal<String>) -> Element {
                     onmousedown: move |_| window().drag(),
                     span {
                         class: "text-xl",  // 移除 ml-3，避免偏移
-                        "SmartReader"
+                        "FastEpub"
                     }
                 }
 

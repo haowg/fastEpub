@@ -1,4 +1,4 @@
-# Smart Reader
+# Fast Epub
 
 <div align="center">
 
