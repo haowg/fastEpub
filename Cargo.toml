@@ -10,6 +10,8 @@ edition = "2021"
 dioxus = { version = "0.6.1", features = ["desktop"] }
 epub = "2.1.2"
 rfd = "0.15.2"
+base64 = "0.21"  # 确保使用兼容的版本
+regex = "1.10"   # 确保使用兼容的版本
 
 [features]
 default = ["desktop"]

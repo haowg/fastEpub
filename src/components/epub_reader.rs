@@ -5,6 +5,8 @@ use epub::doc::EpubDoc;
 use epub::doc::NavPoint;
 use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use std::collections::HashMap;
 
 #[derive(Debug)]
 struct BookState {
@@ -12,6 +14,8 @@ struct BookState {
     metadata: BookMetadata,
     toc: Vec<NavPoint>,  // 新增目录结构
     path_to_chapter: std::collections::HashMap<PathBuf, usize>, // 新增：路径到章节索引的映射
+    images: HashMap<String, String>,  // 添加图片资源映射
+    raw_chapters: HashMap<String, (String, PathBuf)>,  // 添加原始章节内容存储
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -20,6 +24,7 @@ struct Chapter {
     content: String,
     path: PathBuf,
     play_order: usize,
+    processed: bool,  // 添加标记表示是否已处理
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -142,6 +147,8 @@ pub fn EpubReader(current_file: Signal<String>) -> Element {
         },
         toc: Vec::new(),
         path_to_chapter: std::collections::HashMap::new(),
+        images: HashMap::new(),
+        raw_chapters: HashMap::new(),  // 添加原始章节内容存储
     });
 
     let mut current_chapter = use_signal(|| 0);
@@ -195,14 +202,38 @@ pub fn EpubReader(current_file: Signal<String>) -> Element {
         ()
     });
 
-    let chapter = book_state.read().chapters.get(*current_chapter.read())
-        .cloned()
-        .unwrap_or_else(|| Chapter {
-            id: String::new(),
-            content: String::new(),
-            path: PathBuf::new(),
-            play_order: 0,
-        });
+    let chapter = {
+        let mut chapter = {
+            let state = book_state.read();
+            state.chapters.get(*current_chapter.read())
+                .cloned()
+                .unwrap_or_else(|| Chapter {
+                    id: String::new(),
+                    content: String::new(),
+                    path: PathBuf::new(),
+                    play_order: 0,
+                    processed: true,
+                })
+        };
+        
+        // 如果章节未处理，现在处理它
+        if !chapter.processed {
+            let state = book_state.read();
+            if let Some((content, path)) = state.raw_chapters.get(&chapter.id) {
+                chapter.content = process_html_content(content, &state.images, path);
+                chapter.processed = true;
+                drop(state); // Drop the immutable borrow before taking a mutable borrow
+                // 更新处理后的章节
+                let mut state = book_state.write();
+                if let Some(ch) = state.chapters.get_mut(*current_chapter.read()) {
+                    ch.content = chapter.content.clone();
+                    ch.processed = true;
+                }
+            }
+        }
+        
+        chapter
+    };
 
     let go_next = move |_| {
         let mut state = current_chapter.write();
@@ -332,38 +363,98 @@ pub fn EpubReader(current_file: Signal<String>) -> Element {
     }
 }
 
+// 添加处理HTML内容的函数，改进图片路径处理
+fn process_html_content(content: &str, images: &HashMap<String, String>, root_path: &PathBuf) -> String {
+    let re = regex::Regex::new(r#"<img[^>]+src=["']([^"']+)["']"#).unwrap();
+    
+    re.replace_all(content, |caps: &regex::Captures| {
+        let img_src = &caps[1];
+        let img_path = if img_src.starts_with("data:") {
+            img_src.to_string()
+        } else {
+            // 尝试多种路径组合来匹配图片
+            let possible_paths = vec![
+                img_src.to_string(), // 原始路径
+                if img_src.starts_with('/') { 
+                    img_src[1..].to_string() // 移除开头的斜杠
+                } else { 
+                    img_src.to_string() 
+                },
+                format!("{}", img_src.split('/').last().unwrap_or(img_src)), // 仅文件名
+            ];
+
+
+            // 尝试所有可能的路径并返回找到的图片路径或默认图片
+            let default_image = String::from("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA...");
+            match possible_paths.iter()
+                .find(|path| images.contains_key(*path))
+                .and_then(|path| images.get(path)) {
+                    Some(found_image) => found_image.clone(),
+                    None => {
+                        println!("Image not found: {}", img_src); // 调试信息
+                        default_image
+                    }
+                }
+        };
+        
+        format!(r#"<img src="{}" loading="lazy""#, img_path)
+    }).to_string()
+}
+
 #[allow(dead_code)]
 fn load_epub(path: &str, mut book_state: Signal<BookState>) -> Result<(), Box<dyn std::error::Error>> {
     let mut doc = EpubDoc::new(path)?;
     let mut chapters = Vec::new();
+    let mut raw_chapters = HashMap::new();
     let mut path_to_chapter = std::collections::HashMap::new();
-    let mut path_to_spine = std::collections::HashMap::new();
+    let mut images = HashMap::new();
 
-    // 首先建立 spine path 到位置的映射
-    for (spine_index, id) in doc.spine.iter().enumerate() {
-        if let Some(path) = doc.resources.get(id).map(|(p, _)| p.clone()) {
-            path_to_spine.insert(path, spine_index);
+    // 改进图片资源加载
+    let resource_keys: Vec<_> = doc.resources.keys().cloned().collect();
+    for id in resource_keys {
+        if let Some((data, mime)) = doc.get_resource(&id) {
+            let path = doc.resources.get(&id).unwrap().0.clone();
+            if let Some((data, _)) = doc.get_resource(&id) {
+                let base64_data = BASE64.encode(&data);
+                let data_url = format!("data:{};base64,{}", mime, base64_data);
+                
+                // 存储多个路径版本以增加匹配成功率
+                images.insert(path.to_string_lossy().to_string(), data_url.clone());
+                if let Some(file_name) = path.file_name() {
+                    images.insert(file_name.to_string_lossy().to_string(), data_url.clone());
+                }
+                if let Some(path_str) = path.to_str() {
+                    if path_str.starts_with('/') {
+                        images.insert(path_str[1..].to_string(), data_url.clone());
+                    }
+                }
+            }
         }
     }
 
-    // 加载章节内容
+    // 修改章节加载逻辑 - 现在只存储原始内容
     for spine_index in 0..doc.spine.len() {
         let id = doc.spine[spine_index].clone();
         if let Some((chapter_content, _mime)) = doc.get_resource(&id) {
-            let content = String::from_utf8(chapter_content)?;
-            let path = doc.resources.get(&id)
-                .map(|(p, _)| p.clone())
-                .unwrap_or_default();
-            
-            // 保存路径到章节索引的映射
-            path_to_chapter.insert(path.clone(), spine_index);
-            
-            chapters.push(Chapter {
-                id: id.clone(),
-                content,
-                path,
-                play_order: spine_index,
-            });
+            if let Ok(content) = String::from_utf8(chapter_content) {
+                let path = doc.resources.get(&id)
+                    .map(|(p, _)| p.clone())
+                    .unwrap_or_default();
+                
+                // 存储原始内容
+                raw_chapters.insert(id.clone(), (content.clone(), path.clone()));
+                
+                path_to_chapter.insert(path.clone(), spine_index);
+                
+                // 章节只存储基本信息
+                chapters.push(Chapter {
+                    id: id.clone(),
+                    content: String::new(), // 暂时为空
+                    path,
+                    play_order: spine_index,
+                    processed: false,
+                });
+            }
         }
     }
 
@@ -376,9 +467,11 @@ fn load_epub(path: &str, mut book_state: Signal<BookState>) -> Result<(), Box<dy
 
     book_state.set(BookState {
         chapters,
+        raw_chapters, // 添加原始章节内容
         metadata,
         toc: doc.toc.clone(),
         path_to_chapter,
+        images,  // 添加图片资源
     });
     
     Ok(())
