@@ -1,12 +1,7 @@
 use dioxus::prelude::*;
 use std::path::PathBuf;
-use epub::doc::EpubDoc;
-use epub::doc::NavPoint;
-use std::collections::HashSet;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use std::collections::HashMap;
-use crate::components::{TableOfContents, Chapter, BookMetadata};
-use crate::components::{BookState, load_epub};
+use crate::components::{TableOfContents, Chapter, BookMetadata, BookState, load_epub, process_html_content};
 
 #[component]
 pub fn EpubReader(current_file: Signal<String>) -> Element {
@@ -199,42 +194,4 @@ pub fn EpubReader(current_file: Signal<String>) -> Element {
             }
         }
     }
-}
-
-// 添加处理HTML内容的函数，改进图片路径处理
-fn process_html_content(content: &str, images: &HashMap<String, String>, root_path: &PathBuf) -> String {
-    let re = regex::Regex::new(r#"<img[^>]+src=["']([^"']+)["']"#).unwrap();
-    
-    re.replace_all(content, |caps: &regex::Captures| {
-        let img_src = &caps[1];
-        let img_path = if img_src.starts_with("data:") {
-            img_src.to_string()
-        } else {
-            // 尝试多种路径组合来匹配图片
-            let possible_paths = vec![
-                img_src.to_string(), // 原始路径
-                if img_src.starts_with('/') { 
-                    img_src[1..].to_string() // 移除开头的斜杠
-                } else { 
-                    img_src.to_string() 
-                },
-                format!("{}", img_src.split('/').last().unwrap_or(img_src)), // 仅文件名
-            ];
-
-
-            // 尝试所有可能的路径并返回找到的图片路径或默认图片
-            let default_image = String::from("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA...");
-            match possible_paths.iter()
-                .find(|path| images.contains_key(*path))
-                .and_then(|path| images.get(path)) {
-                    Some(found_image) => found_image.clone(),
-                    None => {
-                        println!("Image not found: {}", img_src); // 调试信息
-                        default_image
-                    }
-                }
-        };
-        
-        format!(r#"<img src="{}" loading="lazy""#, img_path)
-    }).to_string()
 }
