@@ -3,8 +3,7 @@ use dioxus::prelude::*;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use epub::doc::NavPoint;
-use crate::components::epub_reader::BookState;
-
+use crate::components::epub_loader::BookState;
 
 fn resolve_chapter_index(
     original: &PathBuf,
