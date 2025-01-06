@@ -1,7 +1,6 @@
 use dioxus::prelude::*;
 use dioxus::desktop::window;
 use rfd::FileDialog;
-use global_attributes::class;
 
 #[component]
 pub fn Header(current_file: Signal<String>) -> Element {
