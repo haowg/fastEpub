@@ -5,33 +5,6 @@ use std::path::PathBuf;
 use epub::doc::NavPoint;
 use crate::components::epub_loader::BookState;
 
-fn resolve_chapter_index(
-    original: &PathBuf,
-    map: &std::collections::HashMap<PathBuf, usize>,
-) -> Option<usize> {
-    // 删除潜在锚点 (#...)
-    let cleaned = original
-        .to_str()
-        .and_then(|s| s.split('#').next())
-        .map(PathBuf::from)
-        .unwrap_or(original.clone());
-
-    // 尝试完整路径
-    if let Some(&idx) = map.get(&cleaned) {
-        return Some(idx);
-    }
-
-    // 尝试仅文件名
-    if let Some(file_name) = cleaned.file_name() {
-        let file_path = PathBuf::from(file_name);
-        if let Some(&idx) = map.get(&file_path) {
-            return Some(idx);
-        }
-    }
-
-    None
-}
-
 #[component]
 fn TocItem(
     entry: NavPoint,
@@ -40,46 +13,56 @@ fn TocItem(
     item_idx: usize,
     current_chapter: Signal<usize>,
     collapsed_nodes: Signal<HashSet<String>>,
-    book_state: Signal<BookState>,
     goto_chapter: EventHandler<usize>,
     toggle_collapse: EventHandler<String>,
 ) -> Element {
-    let entry_label = entry.label.clone();
-    // 使用组合键作为唯一标识
     let node_id = use_memo(move || format!("{}-{}", parent_idx, item_idx));
     let is_collapsed = collapsed_nodes.read().contains(&node_id());
     let has_children = !entry.children.is_empty();
-    let chapter_index = resolve_chapter_index(&entry.content, &book_state.read().path_to_chapter);
     
-    let class_name = match chapter_index {
-        Some(ci) if ci == *current_chapter.read() => "flex-1 cursor-pointer text-left py-1 text-blue-700",
-        _ => "flex-1 cursor-pointer text-left py-1 text-gray-700 hover:bg-gray-400",
+    let class_name = if let Some(ci) = entry.play_order.checked_sub(1) {
+        if ci == *current_chapter.read() {
+            "flex-1 cursor-pointer text-left py-1 text-blue-700 font-bold"
+        } else {
+            "flex-1 cursor-pointer text-left py-1 text-gray-700 hover:text-gray-900 hover:bg-gray-300"
+        }
+    } else {
+        "flex-1 cursor-pointer text-left py-1 text-gray-700 hover:text-gray-900 hover:bg-gray-300"
     };
 
     rsx! {
         div {
-            key: "{node_id}",  // 使用唯一的组合键
+            key: "{node_id}",
             class: "flex flex-col",
-            // 章节标题行
             div {
-                class: "flex items-center gap-1",
-                style: "padding-left: {depth * 12}px",
-                // 折叠按钮
-                {has_children.then(|| rsx!(
-                    button {
-                        class: "w-4 text-gray-500 hover:text-gray-700 focus:outline-none",
-                        onclick: move |_| toggle_collapse.call(node_id.read().clone()),
-                        span {
-                            class: "inline-block transition-transform duration-200",
-                            style: if is_collapsed { "" } else { "transform: rotate(90deg)" },
-                            "▶"
+                class: "flex items-center gap-1 hover:bg-gray-200 rounded",
+                style: "padding-left: {depth * 16}px",
+                
+                // 折叠按钮或占位符
+                div {
+                    class: "w-4 h-4 flex items-center justify-center",
+                    {if has_children {
+                        rsx! {
+                            button {
+                                class: "text-gray-500 hover:text-gray-700 focus:outline-none",
+                                onclick: move |_| toggle_collapse.call(node_id.read().clone()),
+                                span {
+                                    class: "transform transition-transform duration-200",
+                                    style: if is_collapsed { "" } else { "transform: rotate(90deg)" },
+                                    "▶"
+                                }
+                            }
                         }
-                    }
-                ))}
-                // 章节标题
+                    } else {
+                        rsx! { div { class: "w-4 h-4" } }
+                    }}
+                }
+                
                 div {
                     class: "{class_name}",
-                    onclick: move |_| if let Some(ci) = chapter_index { goto_chapter.call(ci) },
+                    onclick: move |_| if let Some(ci) = entry.play_order.checked_sub(1) { 
+                        goto_chapter.call(ci)
+                    },
                     "{entry.label}"
                 }
             }
@@ -89,17 +72,16 @@ fn TocItem(
                 div {
                     class: "flex flex-col",
                     {entry.children.iter().enumerate().map(|(child_idx, child)| {
-                        let child_key = format!("{}-{}-{}", parent_idx, item_idx, child_idx);
+                        let child = child.clone();
                         rsx!(
                             TocItem {
-                                key: "{child_key}",
-                                entry: child.clone(),
+                                key: "{node_id}-{child_idx}",
+                                entry: child,
                                 depth: depth + 1,
                                 parent_idx: item_idx,
                                 item_idx: child_idx,
                                 current_chapter: current_chapter,
                                 collapsed_nodes: collapsed_nodes,
-                                book_state: book_state,
                                 goto_chapter: goto_chapter,
                                 toggle_collapse: toggle_collapse,
                             }
@@ -130,18 +112,18 @@ pub fn TableOfContents(
 
     rsx! {
         div { 
-            class: "flex flex-col gap-1 p-2",
+            class: "flex flex-col gap-1 p-2 select-none",
             {book_state.read().toc.iter().enumerate().map(|(idx, entry)| {
+                let entry = entry.clone();
                 rsx!(
                     TocItem {
                         key: "{idx}",
-                        entry: entry.clone(),
+                        entry: entry,
                         depth: 0,
                         parent_idx: 0,
                         item_idx: idx,
                         current_chapter: current_chapter,
                         collapsed_nodes: collapsed_nodes,
-                        book_state: book_state,
                         goto_chapter: goto_chapter,
                         toggle_collapse: move |id| toggle_collapse(id),
                     }

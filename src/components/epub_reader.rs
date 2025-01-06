@@ -1,30 +1,28 @@
 use dioxus::prelude::*;
 use std::path::PathBuf;
 use std::collections::HashMap;
-use crate::components::{TableOfContents, Chapter, BookMetadata, BookState, load_epub, process_html_content, AppState};
+use crate::components::{TableOfContents, BookMetadata, BookState, load_epub, AppState};
 
 #[component]
 pub fn EpubReader(
     current_file: Signal<String>,
-    app_state: Signal<AppState>, // 添加 app_state 作为属性传入
+    app_state: Signal<AppState>,
 ) -> Element {
     let mut book_state = use_signal(|| BookState {
-        chapters: Vec::new(),
         metadata: BookMetadata {
             title: None,
             author: None,
             description: None,
             cover_id: None,
+            chapter_count: 0,
         },
         toc: Vec::new(),
-        path_to_chapter: HashMap::new(),
-        images: HashMap::new(),
-        raw_chapters: HashMap::new(),
+        current_content: String::new(),
     });
 
     let mut current_chapter = use_signal(|| 0);
     let mut load_error = use_signal(|| None::<String>);
-    let mut sidebar_width = use_signal(|| 192.0); // 初始宽度 192px (w-48)
+    let mut sidebar_width = use_signal(|| 192.0);
     let mut is_resizing = use_signal(|| false);
     let mut preview_width = use_signal(|| 192.0);
     let mut show_preview = use_signal(|| false);
@@ -57,7 +55,7 @@ pub fn EpubReader(
 
     use_effect(move || {
         let file_path = current.read();
-        if !file_path.is_empty() && file_path.ends_with(".epub") {
+        if (!file_path.is_empty() && file_path.ends_with(".epub")) {
             // 修复字符串比较
             let (saved_chapter, existing_book) = {
                 let state = app_state.read();
@@ -101,46 +99,34 @@ pub fn EpubReader(
         ()
     });
 
-    // 优化章节内容处理
-    let chapter = {
-        let chapter_idx = *current_chapter.read();
-        let mut chapter = {
-            let state = book_state.read();
-            state.chapters.get(chapter_idx)
-                .cloned()
-                .unwrap_or_else(|| Chapter {
-                    id: String::new(),
-                    content: String::new(),
-                    path: PathBuf::new(),
-                    play_order: 0,
-                    processed: true,
-                })
-        };
+    use_effect(move || {
+        let chapter = *current_chapter.read();
+        let file_path = current.read();
         
-        if !chapter.processed {
-            let (content, images, path) = {
-                let state = book_state.read();
-                state.raw_chapters.get(&chapter.id)
-                    .map(|(content, path)| (content.clone(), state.images.clone(), path.clone()))
-                    .unwrap_or_default()
-            };
-            
-            chapter.content = process_html_content(&content, &images, &path);
-            chapter.processed = true;
-            
-            let mut state = book_state.write();
-            if let Some(ch) = state.chapters.get_mut(chapter_idx) {
-                ch.content = chapter.content.clone();
-                ch.processed = true;
+        if !file_path.is_empty() && file_path.ends_with(".epub") {
+            if let Ok(mut doc) = epub::doc::EpubDoc::new(&*file_path) {
+                let chapter = BookState::get_chapter(&mut doc, chapter);
+                book_state.write().current_content = chapter.content;
             }
         }
         
-        chapter
-    };
+        ()
+    });
+
+    // 使用缓存内容而不是直接读取
+    let chapter_content = use_memo(move || {
+        let state = book_state.read();
+        state.current_content.clone()
+    });
+
+    // 修改预计算章节数的方式
+    let total_chapters = use_memo(move || {
+        book_state.read().metadata.chapter_count
+    });
 
     let go_next = move |_| {
         let mut state = current_chapter.write();
-        if *state + 1 < book_state.read().chapters.len() {
+        if (*state + 1 < *total_chapters.read()) {
             *state += 1;
             let mut app = app_state.write();
             app.update_progress(current_file.read().to_string(), *state);
@@ -149,7 +135,7 @@ pub fn EpubReader(
 
     let go_prev = move |_| {
         let mut state = current_chapter.write();
-        if *state > 0 {
+        if (*state > 0) {
             *state -= 1;
             let mut app = app_state.write();
             app.update_progress(current_file.read().to_string(), *state);
@@ -158,7 +144,7 @@ pub fn EpubReader(
 
     let mut goto_chapter = move |idx: usize| {
         let mut state = current_chapter.write();
-        if idx < book_state.read().chapters.len() {
+        if (idx < *total_chapters.read()) {
             *state = idx;
             // 保存阅读进度
             let mut app = app_state.write();
@@ -224,7 +210,7 @@ pub fn EpubReader(
                     div { class: "text-red-500", "{error}" }
                 } else {
                     div {
-                        dangerous_inner_html: "{chapter.content}"
+                        dangerous_inner_html: "{chapter_content.read()}"
                     }
                 }
                 // 导航按钮
@@ -237,7 +223,7 @@ pub fn EpubReader(
                     }
                     button {
                         class: "px-4 py-2 bg-gray-300 rounded disabled:opacity-50",
-                        disabled: *current_chapter.read() >= book_state.read().chapters.len().saturating_sub(1),
+                        disabled: *current_chapter.read() >= total_chapters.read().saturating_sub(1),
                         onclick: go_next,
                         "下一章"
                     }
