@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use std::path::PathBuf;
 use std::collections::HashMap;
-use crate::components::{TableOfContents, Chapter, BookMetadata, BookState, load_epub, process_html_content};
+use crate::components::{TableOfContents, Chapter, BookMetadata, BookState, load_epub, process_html_content, AppState};
 
 #[component]
 pub fn EpubReader(current_file: Signal<String>) -> Element {
@@ -25,6 +25,8 @@ pub fn EpubReader(current_file: Signal<String>) -> Element {
     let mut is_resizing = use_signal(|| false);
     let mut preview_width = use_signal(|| 192.0);
     let mut show_preview = use_signal(|| false);
+
+    let mut app_state = use_signal(AppState::load);
 
     let on_mouse_down = move |e: Event<MouseData>| {
         is_resizing.set(true);
@@ -52,9 +54,19 @@ pub fn EpubReader(current_file: Signal<String>) -> Element {
     use_effect(move || {
         let file_path = current_file.read().to_string();
         if (!file_path.is_empty() && file_path.ends_with(".epub")) {
-            current_chapter.set(0); // 重置章节索引
+            // 获取保存的进度
+            let saved_chapter = app_state.read().get_progress(&file_path);
+            
             match load_epub(&file_path, book_state.clone()) {
-                Ok(_) => load_error.set(None),
+                Ok(_) => {
+                    load_error.set(None);
+                    // 恢复阅读进度
+                    if let Some(chapter) = saved_chapter {
+                        current_chapter.set(chapter);
+                    } else {
+                        current_chapter.set(0);
+                    }
+                }
                 Err(e) => load_error.set(Some(e.to_string())),
             }
         }
@@ -98,6 +110,8 @@ pub fn EpubReader(current_file: Signal<String>) -> Element {
         let mut state = current_chapter.write();
         if *state + 1 < book_state.read().chapters.len() {
             *state += 1;
+            let mut app = app_state.write();
+            app.update_progress(current_file.read().to_string(), *state);
         }
     };
 
@@ -105,6 +119,8 @@ pub fn EpubReader(current_file: Signal<String>) -> Element {
         let mut state = current_chapter.write();
         if *state > 0 {
             *state -= 1;
+            let mut app = app_state.write();
+            app.update_progress(current_file.read().to_string(), *state);
         }
     };
 
@@ -112,6 +128,9 @@ pub fn EpubReader(current_file: Signal<String>) -> Element {
         let mut state = current_chapter.write();
         if idx < book_state.read().chapters.len() {
             *state = idx;
+            // 保存阅读进度
+            let mut app = app_state.write();
+            app.update_progress(current_file.read().to_string(), idx);
         }
     };
 

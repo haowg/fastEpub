@@ -5,8 +5,7 @@ use dioxus::desktop::{Config, WindowBuilder};
 use dioxus::document::Stylesheet;
 
 mod components;
-use components::Header;
-use components::EpubReader;
+use components::{Header, EpubReader, AppState};
 
 fn main() {
     dioxus::LaunchBuilder::desktop()
@@ -21,10 +20,15 @@ fn main() {
 
 #[component]
 fn App() -> Element {
-    let current_file = use_signal(|| String::new());
+    let app_state = AppState::load();
+    let current_file = use_signal(|| {
+        app_state.get_last_book()
+            .map(|(path, _)| path)
+            .unwrap_or_default()
+    });
 
     rsx! {
-        Title { "Smart Reader" }
+        Title { "Fast Epub" }
         Stylesheet { href: asset!("src/assets/style.css") }
         Stylesheet { href: asset!("assets/mystyle.css") }
         div { 

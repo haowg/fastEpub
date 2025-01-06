@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 use dioxus::desktop::window;
 use rfd::FileDialog;
+use crate::components::AppState;
+use std::collections::HashMap;
 
 #[component]
 pub fn Header(current_file: Signal<String>) -> Element {
@@ -22,6 +24,9 @@ pub fn Header(current_file: Signal<String>) -> Element {
             .pick_file() 
         {
             if let Some(path) = file.to_str() {
+                let mut app_state = AppState::load();
+                app_state.last_book = Some(path.to_string());
+                let _ = app_state.save();
                 current_file.set(path.to_string());
             }
         }
