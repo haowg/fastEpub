@@ -5,7 +5,11 @@ use crate::components::AppState;
 use std::collections::HashMap;
 
 #[component]
-pub fn Header(current_file: Signal<String>) -> Element {
+pub fn Header(
+    current_file: Signal<String>,
+    show_library: Signal<bool>,
+    app_state: Signal<AppState>,  // 添加 app_state
+) -> Element {
     let mut fullscreen = use_signal(|| false);
     let mut dropdown_open = use_signal(|| false);
 
@@ -28,6 +32,7 @@ pub fn Header(current_file: Signal<String>) -> Element {
                 app_state.last_book = Some(path.to_string());
                 let _ = app_state.save();
                 current_file.set(path.to_string());
+                show_library.set(false); // 添加这行以关闭书库页
             }
         }
         dropdown_open.set(false);
@@ -91,6 +96,14 @@ pub fn Header(current_file: Signal<String>) -> Element {
                                     }
                                     
                                     // 设置菜单组
+                                    div { class: "px-2 py-2 border-b border-gray-200",
+                                        button {
+                                            class: "w-full text-left px-4 py-2 text-gray-800 hover:bg-gray-100 rounded-lg flex items-center",
+                                            onclick: move |_| show_library.set(true),
+                                            span { class: "mr-2", "📚" }
+                                            "我的书库"
+                                        }
+                                    }
                                     div { class: "px-2 py-2",
                                         button {
                                             class: "w-full text-left px-4 py-2 text-gray-800 hover:bg-gray-100 rounded-lg flex items-center",
@@ -152,7 +165,7 @@ pub fn Header(current_file: Signal<String>) -> Element {
                         class: "w-4 h-4 flex items-center justify-center bg-red-500 hover:bg-red-600 text-white rounded-full text-xs",
                         onmousedown: |evt| evt.stop_propagation(),
                         onclick: move |_| window().close(),
-                        "x"
+                        "╳"
                     }
                 }
             }

@@ -4,7 +4,10 @@ use std::collections::HashMap;
 use crate::components::{TableOfContents, Chapter, BookMetadata, BookState, load_epub, process_html_content, AppState};
 
 #[component]
-pub fn EpubReader(current_file: Signal<String>) -> Element {
+pub fn EpubReader(
+    current_file: Signal<String>,
+    app_state: Signal<AppState>, // 添加 app_state 作为属性传入
+) -> Element {
     let mut book_state = use_signal(|| BookState {
         chapters: Vec::new(),
         metadata: BookMetadata {
@@ -26,7 +29,8 @@ pub fn EpubReader(current_file: Signal<String>) -> Element {
     let mut preview_width = use_signal(|| 192.0);
     let mut show_preview = use_signal(|| false);
 
-    let mut app_state = use_signal(AppState::load);
+    // 缓存当前文件路径
+    let current = use_memo(move || current_file.read().to_string());
 
     let on_mouse_down = move |e: Event<MouseData>| {
         is_resizing.set(true);
@@ -52,31 +56,57 @@ pub fn EpubReader(current_file: Signal<String>) -> Element {
     };
 
     use_effect(move || {
-        let file_path = current_file.read().to_string();
-        if (!file_path.is_empty() && file_path.ends_with(".epub")) {
-            // 获取保存的进度
-            let saved_chapter = app_state.read().get_progress(&file_path);
+        let file_path = current.read();
+        if !file_path.is_empty() && file_path.ends_with(".epub") {
+            // 修复字符串比较
+            let (saved_chapter, existing_book) = {
+                let state = app_state.read();
+                (
+                    state.get_progress(&file_path),
+                    state.library.iter().find(|b| *b.path == *file_path).cloned()
+                )
+            };
             
             match load_epub(&file_path, book_state.clone()) {
                 Ok(_) => {
                     load_error.set(None);
-                    // 恢复阅读进度
-                    if let Some(chapter) = saved_chapter {
-                        current_chapter.set(chapter);
-                    } else {
-                        current_chapter.set(0);
+                    
+                    // 仅在书籍不存在时添加到书库
+                    if existing_book.is_none() {
+                        let (title, author) = {
+                            let state = book_state.read();
+                            (
+                                state.metadata.title.clone().unwrap_or_else(|| "未知标题".to_string()),
+                                state.metadata.author.clone().unwrap_or_else(|| "未知作者".to_string())
+                            )
+                        };
+                        
+                        let mut state = app_state.write();
+                        state.add_to_library(
+                            file_path.clone(),
+                            title,
+                            author,
+                            saved_chapter.unwrap_or(0)
+                        );
                     }
+                    
+                    // 设置章节位置
+                    current_chapter.set(saved_chapter.unwrap_or(0));
                 }
                 Err(e) => load_error.set(Some(e.to_string())),
             }
         }
+        
+        // 返回清理函数
         ()
     });
 
+    // 优化章节内容处理
     let chapter = {
+        let chapter_idx = *current_chapter.read();
         let mut chapter = {
             let state = book_state.read();
-            state.chapters.get(*current_chapter.read())
+            state.chapters.get(chapter_idx)
                 .cloned()
                 .unwrap_or_else(|| Chapter {
                     id: String::new(),
@@ -87,19 +117,21 @@ pub fn EpubReader(current_file: Signal<String>) -> Element {
                 })
         };
         
-        // 如果章节未处理，现在处理它
         if !chapter.processed {
-            let state = book_state.read();
-            if let Some((content, path)) = state.raw_chapters.get(&chapter.id) {
-                chapter.content = process_html_content(content, &state.images, path);
-                chapter.processed = true;
-                drop(state); // Drop the immutable borrow before taking a mutable borrow
-                // 更新处理后的章节
-                let mut state = book_state.write();
-                if let Some(ch) = state.chapters.get_mut(*current_chapter.read()) {
-                    ch.content = chapter.content.clone();
-                    ch.processed = true;
-                }
+            let (content, images, path) = {
+                let state = book_state.read();
+                state.raw_chapters.get(&chapter.id)
+                    .map(|(content, path)| (content.clone(), state.images.clone(), path.clone()))
+                    .unwrap_or_default()
+            };
+            
+            chapter.content = process_html_content(&content, &images, &path);
+            chapter.processed = true;
+            
+            let mut state = book_state.write();
+            if let Some(ch) = state.chapters.get_mut(chapter_idx) {
+                ch.content = chapter.content.clone();
+                ch.processed = true;
             }
         }
         

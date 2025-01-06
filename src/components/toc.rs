@@ -36,6 +36,8 @@ fn resolve_chapter_index(
 fn TocItem(
     entry: NavPoint,
     depth: usize,
+    parent_idx: usize,
+    item_idx: usize,
     current_chapter: Signal<usize>,
     collapsed_nodes: Signal<HashSet<String>>,
     book_state: Signal<BookState>,
@@ -43,7 +45,8 @@ fn TocItem(
     toggle_collapse: EventHandler<String>,
 ) -> Element {
     let entry_label = entry.label.clone();
-    let node_id = use_memo(move || entry_label.clone());
+    // 使用组合键作为唯一标识
+    let node_id = use_memo(move || format!("{}-{}", parent_idx, item_idx));
     let is_collapsed = collapsed_nodes.read().contains(&node_id());
     let has_children = !entry.children.is_empty();
     let chapter_index = resolve_chapter_index(&entry.content, &book_state.read().path_to_chapter);
@@ -55,6 +58,7 @@ fn TocItem(
 
     rsx! {
         div {
+            key: "{node_id}",  // 使用唯一的组合键
             class: "flex flex-col",
             // 章节标题行
             div {
@@ -84,18 +88,23 @@ fn TocItem(
             {(!is_collapsed && has_children).then(|| rsx!(
                 div {
                     class: "flex flex-col",
-                    {entry.children.iter().map(|child| rsx!(
-                        TocItem {
-                            key: "{child.label}",
-                            entry: child.clone(),
-                            depth: depth + 1,
-                            current_chapter: current_chapter,
-                            collapsed_nodes: collapsed_nodes,
-                            book_state: book_state,
-                            goto_chapter: goto_chapter,
-                            toggle_collapse: toggle_collapse,
-                        }
-                    ))}
+                    {entry.children.iter().enumerate().map(|(child_idx, child)| {
+                        let child_key = format!("{}-{}-{}", parent_idx, item_idx, child_idx);
+                        rsx!(
+                            TocItem {
+                                key: "{child_key}",
+                                entry: child.clone(),
+                                depth: depth + 1,
+                                parent_idx: item_idx,
+                                item_idx: child_idx,
+                                current_chapter: current_chapter,
+                                collapsed_nodes: collapsed_nodes,
+                                book_state: book_state,
+                                goto_chapter: goto_chapter,
+                                toggle_collapse: toggle_collapse,
+                            }
+                        )
+                    })}
                 }
             ))}
         }
@@ -120,19 +129,24 @@ pub fn TableOfContents(
     };
 
     rsx! {
-        div { class: "flex flex-col gap-1 p-2",
-            {book_state.read().toc.iter().map(|entry| rsx!(
-                TocItem {
-                    key: "{entry.label}",
-                    entry: entry.clone(),
-                    depth: 0,
-                    current_chapter: current_chapter,
-                    collapsed_nodes: collapsed_nodes,
-                    book_state: book_state,
-                    goto_chapter: goto_chapter,
-                    toggle_collapse: move |id| toggle_collapse(id),
-                }
-            ))}
+        div { 
+            class: "flex flex-col gap-1 p-2",
+            {book_state.read().toc.iter().enumerate().map(|(idx, entry)| {
+                rsx!(
+                    TocItem {
+                        key: "{idx}",
+                        entry: entry.clone(),
+                        depth: 0,
+                        parent_idx: 0,
+                        item_idx: idx,
+                        current_chapter: current_chapter,
+                        collapsed_nodes: collapsed_nodes,
+                        book_state: book_state,
+                        goto_chapter: goto_chapter,
+                        toggle_collapse: move |id| toggle_collapse(id),
+                    }
+                )
+            })}
         }
     }
 }
