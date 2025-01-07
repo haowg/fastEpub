@@ -1,4 +1,5 @@
 mod header;
+mod menu;
 mod epub_reader;
 mod toc;
 mod epub_loader;
@@ -8,6 +9,7 @@ mod library;
 
 pub use header::Header;
 pub use epub_reader::EpubReader;
+pub(crate) use menu::MenuButton;
 pub(crate) use toc::TableOfContents;
 pub(crate) use epub_loader::{BookState, Chapter, BookMetadata, load_epub};
 pub(crate) use html_processor::process_html_content;
