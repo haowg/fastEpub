@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use std::path::PathBuf;
 use std::collections::HashMap;
-use crate::components::{TableOfContents, BookMetadata, BookState, load_epub, AppState};
+use crate::components::{TableOfContents, BookMetadata, BookState, load_epub, AppState, process_html_content};
 
 pub fn goto_chapter(
     new_chapter: usize,
@@ -199,9 +199,7 @@ pub fn EpubReader() -> Element {
 }
 
 #[component]
-pub fn content_view(
-    current_chapter: Signal<usize>
-) -> Element {
+pub fn content_view(current_chapter: Signal<usize>) -> Element {
     let mut book_state = use_context::<Signal<BookState>>();
     let chapter_content = use_memo(move || {
         book_state.write().get_chapter(*current_chapter.read()).content
@@ -212,7 +210,8 @@ pub fn content_view(
             class: "flex-1 p-8 overflow-y-auto bg-white text-gray-800 h-full relative",
             style: "z-index: 1",
             div {
-                dangerous_inner_html: "{chapter_content}"
+                dangerous_inner_html: "{chapter_content}",
+                style: "img {{ max-width: 100%; height: auto; display: block; margin: 1em auto; }}"
             }
         }
     }

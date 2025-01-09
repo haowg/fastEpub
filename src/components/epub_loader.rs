@@ -2,10 +2,13 @@ use epub::doc::{EpubDoc, NavPoint};
 use std::path::PathBuf;
 use std::collections::{HashMap, HashSet};
 use dioxus::prelude::*;
-// use crate::components::html_processor::process_html_content;
+use crate::components::html_processor::process_html_content;
 use std::time::Instant;
 use std::fs::File;
 use std::io::{Read, Seek, BufReader};
+use std::fs;
+use base64::{Engine as _, engine::general_purpose};
+use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Chapter {
@@ -39,6 +42,7 @@ impl From<&BookContent> for BookMetadata {
             order_path: content.order_path.clone(),
         }
     }
+
 }
 
 #[derive(Debug)]
@@ -47,6 +51,7 @@ pub struct BookState {
     pub toc: Vec<NavPoint>,
     pub content: BookContent,  // Add content field
     pub doc: Option<EpubDoc<BufReader<File>>>,
+    pub image_cache: HashMap<String, String>,  // 改为存储 base64 字符串
 }
 
 impl BookState {
@@ -64,7 +69,78 @@ impl BookState {
             toc: Vec::new(),
             content: BookContent::empty(),
             doc: None,
+            image_cache: HashMap::new(),
         }
+    }
+
+    fn get_mime_type(path: &Path) -> Option<&'static str> {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| match ext.to_lowercase().as_str() {
+                "jpg" | "jpeg" => "image/jpeg",
+                "png" => "image/png",
+                "gif" => "image/gif",
+                "webp" => "image/webp",
+                "svg" => "image/svg+xml",
+                _ => "image/jpeg",  // 默认为jpeg
+            })
+    }
+
+    fn is_image_path(path: &Path) -> bool {
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            matches!(ext.to_lowercase().as_str(), 
+                "jpg" | "jpeg" | "png" | "gif" | "webp" | "svg" | 
+                "bmp" | "tiff" | "tif" | "ico"
+            )
+        } else {
+            false
+        }
+    }
+
+    fn cache_images(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(ref mut doc) = self.doc {
+            let mut image_cache = HashMap::new();
+
+            let resources = doc.resources.clone();
+            for (id, (path, mime)) in resources.iter() {
+                // 同时检查 mime 类型和文件路径
+                if mime.starts_with("image/") || Self::is_image_path(path) {
+                    if let Some((data, _)) = doc.get_resource(id) {
+                        let actual_mime = if mime.starts_with("image/") {
+                            mime.clone()
+                        } else {
+                            Self::get_mime_type(path).unwrap_or("image/jpeg").to_string()
+                        };
+
+                        let base64_str = format!(
+                            "data:{};base64,{}", 
+                            actual_mime,
+                            general_purpose::STANDARD.encode(&data)
+                        );
+
+                        // 存储多种路径格式
+                        if let Some(path_str) = path.to_str() {
+                            // 完整路径
+                            let clean_path = path_str.replace("\\", "/");
+                            image_cache.insert(clean_path.clone(), base64_str.clone());
+                            
+                            // 相对路径 (去掉 OEBPS)
+                            if let Some(rel_path) = clean_path.strip_prefix("OEBPS/") {
+                                image_cache.insert(rel_path.to_string(), base64_str.clone());
+                            }
+                            
+                            // 文件名
+                            if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                                image_cache.insert(file_name.to_string(), base64_str.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
+            self.image_cache = image_cache;
+        }
+        Ok(())
     }
 
     pub fn get_chapter(&mut self, play_order: usize) -> Chapter {
@@ -73,11 +149,17 @@ impl BookState {
             if let Some(ref mut doc) = self.doc {
                 let cleaned_path = path.to_str().unwrap_or("").split("#").next().unwrap_or("");
                 if let Some(content) = doc.get_resource_str_by_path(cleaned_path) {
+                    // 修改：将资源基础路径传递给处理函数
+                    let processed_content = process_html_content(
+                        &content, 
+                        &doc.resources,
+                        &self.image_cache  // 传递图片缓存而不是root_base
+                    );
                     return Chapter {
                         id: path.display().to_string(),
-                        content,
+                        content: processed_content,
                         path: path.clone(),
-                        play_order: play_order,
+                        play_order,
                         processed: true,
                     };
                 }
@@ -98,6 +180,7 @@ impl BookState {
                 processed: true,
             }
         }
+
     }
 }
 
@@ -203,7 +286,11 @@ pub fn load_epub(path: &str) -> Result<(), Box<dyn std::error::Error>> {
         toc: book_content.toc.clone(),
         content: book_content,
         doc: Some(EpubDoc::new(path)?),
+        image_cache: HashMap::new(),
     });
+
+    let mut state = book_state.write();
+    state.cache_images()?;  // 缓存图片为base64
     
     Ok(())
 }
