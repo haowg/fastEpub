@@ -7,9 +7,9 @@ use std::path::PathBuf;
 #[component]
 fn BookCard(
     book: BookInfo,
-    current_file: Signal<String>,
     show_library: Signal<bool>,
 ) -> Element {
+    let mut current_file = use_context::<Signal<String>>();
     let file_exists = PathBuf::from(&book.path).exists();
     let card_class = if file_exists {
         "bg-white dark:bg-gray-800 rounded-lg transition-all cursor-pointer hover:shadow-lg hover:-translate-y-1 flex flex-col w-40 h-56"  // 固定卡片尺寸
@@ -70,16 +70,16 @@ fn BookCard(
 
 #[component]
 pub fn Library(
-    current_file: Signal<String>,
     show_library: Signal<bool>,
-    app_state: Signal<AppState>,
 ) -> Element {
+    let mut app_state = use_context::<Signal<AppState>>();
+    let current_file = use_context::<Signal<String>>();
     // 缓存当前文件
     let current = use_memo(move || current_file.read().to_string());
     
     // 缓存书籍列表，只在 app_state 变化时更新
     let books = use_memo(move || {
-        let state = app_state.read();
+        let mut state = app_state.read();
         let mut books = state.get_library();
         books.retain(|book| PathBuf::from(&book.path).exists());
         books
@@ -139,7 +139,6 @@ pub fn Library(
                 {books.iter().map(|book| rsx!(
                     BookCard {
                         book: book.clone(),
-                        current_file: current_file,
                         show_library: show_library,
                     }
                 ))}

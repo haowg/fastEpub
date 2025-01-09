@@ -7,10 +7,10 @@ use std::time::Instant;
 
 #[component]
 pub fn Header(
-    current_file: Signal<String>,
     show_library: Signal<bool>,
-    app_state: Signal<AppState>,
 ) -> Element {
+    let app_state = use_context::<Signal<AppState>>();
+    let current_file = use_context::<Signal<String>>();
     let mut maximized = use_signal(|| window().is_maximized());
     let mut is_dragging = use_signal(|| false);
     let mut mouse_down_pos = use_signal(|| None::<(f64, f64)>);

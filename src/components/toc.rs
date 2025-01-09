@@ -3,7 +3,16 @@ use dioxus::prelude::*;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use epub::doc::NavPoint;
-use crate::components::epub_loader::BookState;
+use crate::components::epub_loader::{BookState};
+use crate::components::{AppState, goto_chapter};
+
+fn toggle_node_collapse(nodes: &mut HashSet<String>, idx: String) {
+    if nodes.contains(&idx) {
+        nodes.remove(&idx);
+    } else {
+        nodes.insert(idx);
+    }
+}
 
 #[component]
 fn TocItem(
@@ -11,14 +20,14 @@ fn TocItem(
     depth: usize,
     parent_idx: usize,
     item_idx: usize,
-    current_chapter: Signal<usize>,
     collapsed_nodes: Signal<HashSet<String>>,
-    goto_chapter: EventHandler<usize>,
     toggle_collapse: EventHandler<String>,
 ) -> Element {
+    let current_chapter = use_context::<Signal<usize>>();
     let node_id = use_memo(move || format!("{}-{}", parent_idx, item_idx));
     let is_collapsed = collapsed_nodes.read().contains(&node_id());
     let has_children = !entry.children.is_empty();
+    // println!("{}: {}", node_id(), is_collapsed);
     
     let class_name = if let Some(ci) = entry.play_order.checked_sub(1) {
         if ci == *current_chapter.read() {
@@ -61,7 +70,7 @@ fn TocItem(
                 div {
                     class: "{class_name}",
                     onclick: move |_| if let Some(ci) = entry.play_order.checked_sub(1) { 
-                        goto_chapter.call(ci)
+                        goto_chapter(ci);
                     },
                     "{entry.label}"
                 }
@@ -80,9 +89,7 @@ fn TocItem(
                                 depth: depth + 1,
                                 parent_idx: item_idx,
                                 item_idx: child_idx,
-                                current_chapter: current_chapter,
                                 collapsed_nodes: collapsed_nodes,
-                                goto_chapter: goto_chapter,
                                 toggle_collapse: toggle_collapse,
                             }
                         )
@@ -95,25 +102,22 @@ fn TocItem(
 
 #[component]
 pub fn TableOfContents(
-    current_chapter: Signal<usize>,
-    book_state: Signal<BookState>,
-    goto_chapter: EventHandler<usize>,
 ) -> Element {
+    let book_state = use_context::<Signal<BookState>>();
+    println!("TableOfContents");
+    
+    // 使用 memo 缓存目录数据，避免不必要的重渲染
+    let toc_data = use_memo(move || {
+        book_state.read().toc.clone()
+    });
+
+    // 缓存折叠状态
     let mut collapsed_nodes = use_signal(|| HashSet::new());
     
-    let mut toggle_collapse = move |idx: String| {
-        let mut nodes = collapsed_nodes.write();
-        if nodes.contains(&idx) {
-            nodes.remove(&idx);
-        } else {
-            nodes.insert(idx);
-        }
-    };
-
     rsx! {
         div { 
             class: "flex flex-col gap-1 p-2 select-none",
-            {book_state.read().toc.iter().enumerate().map(|(idx, entry)| {
+            {toc_data.read().iter().enumerate().map(|(idx, entry)| {
                 let entry = entry.clone();
                 rsx!(
                     TocItem {
@@ -122,10 +126,8 @@ pub fn TableOfContents(
                         depth: 0,
                         parent_idx: 0,
                         item_idx: idx,
-                        current_chapter: current_chapter,
                         collapsed_nodes: collapsed_nodes,
-                        goto_chapter: goto_chapter,
-                        toggle_collapse: move |id| toggle_collapse(id),
+                        toggle_collapse: move |id| toggle_node_collapse(&mut collapsed_nodes.write(), id),
                     }
                 )
             })}

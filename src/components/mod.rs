@@ -8,7 +8,7 @@ mod storage;
 mod library;
 
 pub use header::Header;
-pub use epub_reader::EpubReader;
+pub use epub_reader::{EpubReader, goto_chapter}; // 更新导出
 pub(crate) use menu::MenuButton;
 pub(crate) use toc::TableOfContents;
 pub(crate) use epub_loader::{BookState, Chapter, BookMetadata, load_epub};
