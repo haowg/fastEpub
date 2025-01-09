@@ -9,11 +9,11 @@ pub fn goto_chapter(
     let book_state = use_context::<Signal<BookState>>();
     let mut app_state = use_context::<Signal<AppState>>();
     let current_file = use_context::<Signal<String>>();
-    let mut current_chapter = use_context::<Signal<usize>>();
 
     let total = book_state.read().metadata.chapter_count;
     if new_chapter < total {
         let mut state = app_state.write();
+        let mut current_chapter = use_context::<Signal<usize>>();
         current_chapter.set(new_chapter);
         state.update_progress(current_file.read().to_string(), new_chapter);
     }
@@ -104,17 +104,20 @@ pub fn EpubReader() -> Element {
     });
 
     let go_next = move |_| {
-        if *current_chapter.read() + 1 < book_state.read().metadata.chapter_count {
+        let new_chapter = *current_chapter.read() + 1;
+        if new_chapter < book_state.read().metadata.chapter_count {
             goto_chapter(
-                *current_chapter.read() + 1,
+                new_chapter
             );
         }
     };
 
     let go_prev = move |_| {
-        if *current_chapter.read() > 0 {
+
+        let new_chapter = *current_chapter.read() - 1;
+        if new_chapter > 0 {
             goto_chapter(
-                *current_chapter.read() - 1,
+                new_chapter
             );
         }
     };
@@ -186,6 +189,7 @@ pub fn EpubReader() -> Element {
                         class: "px-4 py-2 bg-gray-300 rounded disabled:opacity-50",
                         disabled: *current_chapter.read() >= total_chapters.read().saturating_sub(1),
                         onclick: go_next,
+
                         "下一章"
                     }
                 }
@@ -198,9 +202,9 @@ pub fn EpubReader() -> Element {
 pub fn content_view(
     current_chapter: Signal<usize>
 ) -> Element {
-    let book_state = use_context::<Signal<BookState>>();
+    let mut book_state = use_context::<Signal<BookState>>();
     let chapter_content = use_memo(move || {
-        book_state.read().get_chapter(*current_chapter.read()).content
+        book_state.write().get_chapter(*current_chapter.read()).content
     });
 
     rsx! {

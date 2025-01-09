@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 // use crate::components::html_processor::process_html_content;
 use std::time::Instant;
 use std::fs::File;
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, BufReader};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Chapter {
@@ -24,6 +24,7 @@ pub struct BookMetadata {
     pub description: Option<String>,
     pub cover_id: Option<String>,
     pub chapter_count: usize,
+    pub order_path: HashMap<usize, PathBuf>,
 }
 
 impl From<&BookContent> for BookMetadata {
@@ -35,15 +36,17 @@ impl From<&BookContent> for BookMetadata {
             description: content.metadata.get("description").and_then(|v| v.first()).cloned(),
             cover_id: content.cover_id.clone(),
             chapter_count: content.spine.len(),
+            order_path: content.order_path.clone(),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub struct BookState {
     pub metadata: BookMetadata,
     pub toc: Vec<NavPoint>,
     pub content: BookContent,  // Add content field
+    pub doc: Option<EpubDoc<BufReader<File>>>,
 }
 
 impl BookState {
@@ -56,45 +59,45 @@ impl BookState {
                 description: None,
                 cover_id: None,
                 chapter_count: 0,
+                order_path: HashMap::new(),
             },
             toc: Vec::new(),
             content: BookContent::empty(),
+            doc: None,
         }
     }
 
-    pub fn get_chapter(&self, chapter_idx: usize) -> Chapter {
-        // Move get_chapter logic here
-        let default_chapter = Chapter {
-            id: String::new(),
-            content: String::from("章节加载失败"),
-            path: PathBuf::new(),
-            play_order: 0,
-            processed: true,
-        };
-        println!("Getting chapter: {}", chapter_idx);
-
-        if chapter_idx >= self.content.spine.len() {
-            return default_chapter;
-        }
-        println!("pass length check {}", chapter_idx);
-
-        let id = &self.content.spine[chapter_idx];
-        if let Some(content) = self.content.resource_content.get(id) {
-            if let Ok(content_str) = String::from_utf8(content.clone()) {
-                let path = self.content.resources.get(id)
-                    .map(|(p, _)| p.clone())
-                    .unwrap_or_default();
-                
-                return Chapter {
-                    id: id.clone(),
-                    content: content_str,
-                    path,
-                    play_order: chapter_idx,
-                    processed: true,
-                };
+    pub fn get_chapter(&mut self, play_order: usize) -> Chapter {
+        // If no cached entry, fall back to doc and toc
+        if let Some(path) = self.content.order_path.get(&play_order) {
+            if let Some(ref mut doc) = self.doc {
+                let cleaned_path = path.to_str().unwrap_or("").split("#").next().unwrap_or("");
+                if let Some(content) = doc.get_resource_str_by_path(cleaned_path) {
+                    return Chapter {
+                        id: path.display().to_string(),
+                        content,
+                        path: path.clone(),
+                        play_order: play_order,
+                        processed: true,
+                    };
+                }
+            }
+            Chapter {
+                id: path.display().to_string(),
+                content: "无法读取章节".into(),
+                path: path.clone(),
+                play_order: play_order,
+                processed: true,
+            }
+        } else {
+            Chapter {
+                id: play_order.to_string(),
+                content: "章节不存在".into(),
+                path: PathBuf::new(),
+                play_order: play_order,
+                processed: true,
             }
         }
-        default_chapter
     }
 }
 
@@ -111,6 +114,7 @@ pub struct BookContent {
     pub extra_css: Vec<String>,
     pub unique_identifier: Option<String>,
     pub cover_id: Option<String>,
+    order_path: HashMap<usize, PathBuf>,
 }
 
 impl BookContent {
@@ -127,6 +131,7 @@ impl BookContent {
             extra_css: Vec::new(),
             unique_identifier: None,
             cover_id: None,
+            order_path: HashMap::new(),
         }
     }
 
@@ -134,20 +139,37 @@ impl BookContent {
         let mut resource_content = HashMap::new();
         for id in doc.spine.clone() {
             if let Some((content, _mime)) = doc.get_resource(&id) {
-                resource_content.insert(id, content);
+            resource_content.insert(id, content);
             }
         }
         resource_content
     }
+    fn expand_toc(toc: Vec<NavPoint>) -> Vec<(usize, PathBuf)> {
+        let mut result = Vec::new();
+
+        // 遍历每个章节
+        for nav in toc {
+            // 添加当前章节路径
+            result.push((nav.play_order, nav.content.clone()));
+            
+            // 递归展开子章节
+            if nav.children.len() > 0 {
+                result.extend(Self::expand_toc(nav.children.clone()));
+            }
+        }
+
+        result
+    }
 
     fn from_epub<R: Read + Seek>(mut doc: EpubDoc<R>) -> Result<Self, Box<dyn std::error::Error>> {
-        // Read all data first
         let resource_content = Self::read_all_resources(&mut doc);
-        
-        // Debug print TOC data
-        println!("Loading TOC with {} entries", doc.toc.len());
-        
-        // Clone necessary data
+        let chapter_paths: Vec<(usize, PathBuf)> = Self::expand_toc(doc.toc.clone());
+        // Then read content for each path
+        let mut order_path = HashMap::new();
+        for (play_order, path) in chapter_paths {
+            order_path.insert(play_order, path);
+        }
+
         let content = Self {
             current: 0,
             spine: doc.spine.clone(),
@@ -160,26 +182,19 @@ impl BookContent {
             extra_css: doc.extra_css.clone(),
             unique_identifier: doc.unique_identifier.clone(),
             cover_id: doc.cover_id.clone(),
+            order_path: order_path,
         };
-
-        // Verify TOC data
-        println!("Created BookContent with {} TOC entries", content.toc.len());
-        
-        // Explicitly drop doc here
-        drop(doc);
         
         Ok(content)
     }
 }
 
 pub fn load_epub(path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Loading epub: {}", path);
     let mut book_state = use_context::<Signal<BookState>>();
     let start = Instant::now();
     
     let book_content = {
         let doc = EpubDoc::new(path)?;
-        println!("Initial TOC size: {}", doc.toc.len());
         BookContent::from_epub(doc)?
     };
 
@@ -187,8 +202,8 @@ pub fn load_epub(path: &str) -> Result<(), Box<dyn std::error::Error>> {
         metadata: (&book_content).into(),
         toc: book_content.toc.clone(),
         content: book_content,
+        doc: Some(EpubDoc::new(path)?),
     });
     
-    println!("Load completed in: {:?}", start.elapsed());
     Ok(())
 }
