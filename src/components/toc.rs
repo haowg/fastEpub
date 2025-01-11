@@ -3,7 +3,11 @@ use std::collections::HashSet;
 use std::println;
 use epub::doc::NavPoint;
 use crate::components::epub_loader::BookState;
-use crate::components::epub_reader::goto_chapter;
+
+#[derive(Props, PartialEq, Clone)]
+pub struct TableOfContentsProps {
+    on_select: EventHandler<usize>,
+}
 
 #[derive(Props, PartialEq, Clone)]
 pub struct TocItemProps {
@@ -31,6 +35,7 @@ fn TocItem(props: TocItemProps) -> Element {
     let current_chapter = use_context::<Signal<usize>>();
     let node_id = format!("{}-{}", props.parent_idx, props.item_idx);
     let has_children = !props.entry.children.is_empty();
+
     let is_collapsed = props.collapsed_nodes.read().contains(&node_id);
     let chapter_index = props.entry.play_order.saturating_sub(1);
     
@@ -59,8 +64,7 @@ fn TocItem(props: TocItemProps) -> Element {
                                 onclick: move |_| props.on_toggle.call(node_id.clone()),
                                 span {
                                     class: "transform transition-transform duration-200",
-                                    style: if is_collapsed { "" } else { "transform: rotate(90deg)" },
-                                    "▶"
+                                    if is_collapsed { "▶" } else { "▼" },
                                 }
                             }
                         }
@@ -123,7 +127,7 @@ fn TocChildren(props: TocChildrenProps) -> Element {
 }
 
 #[component]
-pub fn TableOfContents() -> Element {
+pub fn TableOfContents(props: TableOfContentsProps) -> Element {
     let book_state = use_context::<Signal<BookState>>();
     let mut collapsed_nodes = use_signal(|| HashSet::new());
     
@@ -152,7 +156,7 @@ pub fn TableOfContents() -> Element {
                         item_idx: idx,
                         collapsed_nodes: collapsed_nodes.clone(), // pass entire signal
                         on_toggle: move |id| on_toggle(id),
-                        on_select: move |chapter| goto_chapter(chapter),
+                        on_select: props.on_select.clone(),
                     }
                 )
             })}

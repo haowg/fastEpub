@@ -3,28 +3,19 @@ use std::path::PathBuf;
 use std::collections::HashMap;
 use crate::components::{TableOfContents, BookMetadata, BookState, load_epub, AppState, process_html_content};
 
-pub fn goto_chapter(
-    new_chapter: usize,
-) {
-    let book_state = use_context::<Signal<BookState>>();
-    let mut app_state = use_context::<Signal<AppState>>();
-    let current_file = use_context::<Signal<String>>();
-
-    let total = book_state.read().metadata.chapter_count;
-    if new_chapter < total {
-        let mut state = app_state.write();
-        let mut current_chapter = use_context::<Signal<usize>>();
-        current_chapter.set(new_chapter);
-        state.update_progress(current_file.read().to_string(), new_chapter);
-    }
-}
-
 #[component]
 pub fn EpubReader() -> Element {
     let mut app_state = use_context::<Signal<AppState>>();
     let current_file = use_context::<Signal<String>>();
     let book_state = use_context_provider(|| Signal::new(BookState::empty()));
     let mut current_chapter = use_context_provider(|| Signal::new(0));
+
+    // 将 goto_chapter 定义为闭包
+    let mut goto_chapter = move |new_chapter: usize| {
+        let mut state = app_state.write();
+        current_chapter.set(new_chapter);
+        state.update_progress(current_file.read().to_string(), new_chapter);
+    };
 
     let mut loaded_file = use_signal(|| String::new());
     let mut load_error = use_signal(|| None::<String>);
@@ -150,7 +141,9 @@ pub fn EpubReader() -> Element {
                     }
                 },
                 // 使用新的目录组件
-                TableOfContents { }
+                TableOfContents {
+                    on_select: move |chapter| goto_chapter(chapter)
+                }
             }
 
             // 拖动条
