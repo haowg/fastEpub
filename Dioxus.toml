@@ -1,24 +1,44 @@
 [application]
-
-# App (Project) Name
-name = "smart_reader"
+name = "fastEpub"
+default_platform = "desktop"
+out_dir = "dist"
+asset_dir = "assets"
 
 [web.app]
+title = "fastEpub"
 
-# HTML title tag content
-title = "smart_reader"
+[web.watcher]
+reload_html = true
+watch_path = ["src", "assets"]
 
-# include `assets` in web platform
+
+# 统一资源路径，避免重复
 [web.resource]
+webview2_installer = true
+style = [
+    "assets/style.css",
+    "assets/mystyle.css",
+    "src/assets/style.css"
+]
 
-# Additional CSS style files
-style = []
-
-# Additional JavaScript files
-script = []
-
+# 开发环境使用相同的资源路径
 [web.resource.dev]
+webview2_installer = true
 
-# Javascript code file
-# serve: [dev-server] only
-script = []
+[application.tools]
+css_processor = "tailwind"
+
+[application.tools.tailwind]
+config = "tailwind.config.js"
+style = "src/assets/style.css"
+content = ["src/**/*.{rs,html}"]
+
+[bundle]
+icon = ["assets/icon.png"]
+identifier = "com.fastepub.app"
+resources = ["assets/**/*"]
+target = "release"
+
+[[platform]]
+name = "windows"
+target = "x86_64-pc-windows-gnu"

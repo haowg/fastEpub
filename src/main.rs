@@ -1,4 +1,5 @@
 #![allow(non_snake_case)]
+#![cfg_attr(windows, windows_subsystem = "windows")]
 use dioxus::prelude::*;
 use dioxus::document::Title;
 use dioxus::desktop::{Config, WindowBuilder};
@@ -6,7 +7,6 @@ use dioxus::document::Stylesheet;
 
 mod components;
 use components::{Header, EpubReader, AppState, Library};
-
 fn main() {
     dioxus::LaunchBuilder::desktop()
         .with_cfg(Config::new().with_window(
