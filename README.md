@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Smart Reader Logo](assets/logo.png)
+![Fast Epub Logo](assets/logo.png)
 
 [![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://www.rust-lang.org)
 [![Dioxus](https://img.shields.io/badge/dioxus-latest-blue.svg)](https://dioxuslabs.com)
@@ -29,7 +29,7 @@ A modern, cross-platform EPUB reader built with Rust and Dioxus.
 
 ## Performance
 
-Smart Reader is built with performance in mind:
+Fast Epub is built with performance in mind:
 
 - **Fast Loading**: Opens large EPUB files (100MB+) in milliseconds
 - **Efficient Memory**: Loads chapters on-demand to minimize memory usage

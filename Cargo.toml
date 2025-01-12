@@ -1,5 +1,5 @@
 [package]
-name = "smart_reader"
+name = "fast_epub"
 version = "0.1.0"
 authors = ["haowg <haoweiguoyouxiang@163.com>"]
 edition = "2021"

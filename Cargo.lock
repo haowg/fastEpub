@@ -1572,6 +1572,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "fast_epub"
+version = "0.1.0"
+dependencies = [
+ "async-std",
+ "base64",
+ "chrono",
+ "dioxus",
+ "dirs",
+ "epub",
+ "regex",
+ "rfd 0.15.2",
+ "scraper",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4216,23 +4233,6 @@ name = "smallvec"
 version = "1.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
-
-[[package]]
-name = "smart_reader"
-version = "0.1.0"
-dependencies = [
- "async-std",
- "base64",
- "chrono",
- "dioxus",
- "dirs",
- "epub",
- "regex",
- "rfd 0.15.2",
- "scraper",
- "serde",
- "serde_json",
-]
 
 [[package]]
 name = "socket2"

@@ -13,7 +13,7 @@ fn main() {
             WindowBuilder::new()
                 .with_resizable(true)
                 .with_decorations(false) // Disable native window decorations
-                .with_title("Smart Reader")
+                .with_title("FastEpub")
         ))
         .launch(App)
 }
