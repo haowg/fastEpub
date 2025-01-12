@@ -28,6 +28,7 @@ pub struct BookMetadata {
     pub cover_id: Option<String>,
     pub chapter_count: usize,
     pub order_path: HashMap<usize, PathBuf>,
+    pub spine_to_order: HashMap<usize, usize>,  // Add this field
 }
 
 impl From<&BookContent> for BookMetadata {
@@ -40,6 +41,7 @@ impl From<&BookContent> for BookMetadata {
             cover_id: content.cover_id.clone(),
             chapter_count: content.spine.len(),
             order_path: content.order_path.clone(),
+            spine_to_order: content.spine_to_order.clone(),
         }
     }
 
@@ -65,6 +67,7 @@ impl BookState {
                 cover_id: None,
                 chapter_count: 0,
                 order_path: HashMap::new(),
+                spine_to_order: HashMap::new(),
             },
             toc: Vec::new(),
             content: BookContent::empty(),
@@ -197,7 +200,8 @@ pub struct BookContent {
     pub extra_css: Vec<String>,
     pub unique_identifier: Option<String>,
     pub cover_id: Option<String>,
-    order_path: HashMap<usize, PathBuf>,
+    pub order_path: HashMap<usize, PathBuf>,
+    pub spine_to_order: HashMap<usize, usize>,  // Add this field
 }
 
 impl BookContent {
@@ -215,6 +219,7 @@ impl BookContent {
             unique_identifier: None,
             cover_id: None,
             order_path: HashMap::new(),
+            spine_to_order: HashMap::new(),
         }
     }
 
@@ -247,10 +252,33 @@ impl BookContent {
     fn from_epub<R: Read + Seek>(mut doc: EpubDoc<R>) -> Result<Self, Box<dyn std::error::Error>> {
         let resource_content = Self::read_all_resources(&mut doc);
         let chapter_paths: Vec<(usize, PathBuf)> = Self::expand_toc(doc.toc.clone());
-        // Then read content for each path
+        
         let mut order_path = HashMap::new();
-        for (play_order, path) in chapter_paths {
-            order_path.insert(play_order, path);
+        let mut spine_to_order = HashMap::new();
+        
+        // Build the mapping between spine index and play_order
+        for (play_order, path) in chapter_paths.iter() {
+            order_path.insert(*play_order, path.clone());
+            
+            // Get clean path without anchor
+            let clean_path = path.to_str()
+                .unwrap_or("")
+                .split("#")
+                .next()
+                .unwrap_or("");
+                
+            // Find matching resource ID from resources map
+            if let Some((resource_id, _)) = doc.resources.iter()
+                .find(|(_, (res_path, _))| {
+                    res_path.to_str()
+                        .unwrap_or("")
+                        .contains(clean_path)
+                }) {
+                // Find this resource ID in spine
+                if let Some(spine_idx) = doc.spine.iter().position(|id| id == resource_id) {
+                    spine_to_order.insert(spine_idx, *play_order);
+                }
+            }
         }
 
         let content = Self {
@@ -266,10 +294,19 @@ impl BookContent {
             unique_identifier: doc.unique_identifier.clone(),
             cover_id: doc.cover_id.clone(),
             order_path: order_path,
+            spine_to_order,
         };
         
         Ok(content)
     }
+
+    pub fn get_spine_index(&self, play_order: usize) -> Option<usize> {
+        self.spine_to_order
+            .iter()
+            .find(|(_spine_idx, &order)| order == play_order)
+            .map(|(&spine_idx, _)| spine_idx)
+    }
+
 }
 
 pub fn load_epub(path: &str) -> Result<(), Box<dyn std::error::Error>> {

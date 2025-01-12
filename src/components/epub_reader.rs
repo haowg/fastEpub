@@ -3,18 +3,56 @@ use std::path::PathBuf;
 use std::collections::HashMap;
 use crate::components::{TableOfContents, BookMetadata, BookState, load_epub, AppState, process_html_content};
 
+#[derive(Props, PartialEq, Clone)]
+pub struct ContentViewProps {
+    pub content: String,
+}
+
 #[component]
 pub fn EpubReader() -> Element {
     let mut app_state = use_context::<Signal<AppState>>();
     let current_file = use_context::<Signal<String>>();
-    let book_state = use_context_provider(|| Signal::new(BookState::empty()));
+    let mut book_state = use_context_provider(|| Signal::new(BookState::empty()));
     let mut current_chapter = use_context_provider(|| Signal::new(0));
+    let mut spine_index = use_signal(|| 0); // 改为use_signal
+    let mut chapter_content = use_signal(|| String::new());
 
     // 将 goto_chapter 定义为闭包
     let mut goto_chapter = move |new_chapter: usize| {
         let mut state = app_state.write();
         current_chapter.set(new_chapter);
+        
+        // 更新spine_index
+        if let Some(idx) = book_state.read().content.get_spine_index(new_chapter) {
+            spine_index.set(idx);  // 使用set方法更新值
+        }
+        
         state.update_progress(current_file.read().to_string(), new_chapter);
+        let content = book_state.write().get_chapter(new_chapter).content;
+        chapter_content.set(content);
+    };
+
+    // 将 set_chapter_by_spine 定义为闭包
+    let mut set_chapter_by_spine = move |idx: usize| {
+        spine_index.set(idx);  // 使用set方法更新值
+        let image_cache = book_state.read().image_cache.clone();
+        let mut st = book_state.write();
+        if let Some(ref mut doc) = st.doc {
+            let spine_id = doc.spine.get(idx).cloned();
+            if let Some(spine_id) = spine_id {
+                if let Some((raw_content, _)) = doc.get_resource(&spine_id) {
+                    let processed = process_html_content(
+                        &String::from_utf8_lossy(&raw_content),
+                        &doc.resources,
+                        &image_cache
+                    );
+                    chapter_content.set(processed);
+                }
+                if let Some(&play_order) = st.content.spine_to_order.get(&idx) {
+                    current_chapter.set(play_order);
+                }
+            }
+        }
     };
 
     let mut loaded_file = use_signal(|| String::new());
@@ -54,16 +92,32 @@ pub fn EpubReader() -> Element {
     use_effect(move || {
         let file_path = current.read().to_string();
         if (!file_path.is_empty() && 
-           *loaded_file.read() != file_path) { // 只在文件变化时加载
+           *loaded_file.read() != file_path) {
             
             let saved_chapter = app_state.read().get_progress(&file_path);
             
             match load_epub(&file_path) {
                 Ok(_) => {
                     load_error.set(None);
-                    loaded_file.set(file_path.clone()); // 更新已加载文件
+                    loaded_file.set(file_path.clone());
                     
-                    // 更新书库和章节位置
+                    let chapter = saved_chapter.unwrap_or(0);
+                    
+                    // 先设置spine_index为0，防止未初始化状态
+                    spine_index.set(0);  // 使用set方法设置初始值
+
+                    current_chapter.set(chapter);
+                    
+                    // 获取内容并更新spine_index
+                    let content = book_state.write().get_chapter(chapter).content;
+                    chapter_content.set(content);
+                    
+                    // 更新spine_index (如果找到对应的索引)
+                    if let Some(idx) = book_state.read().content.get_spine_index(chapter) {
+                        spine_index.set(idx);  // 使用set方法更新值
+                    }
+                    
+                    // 更新书库
                     let (title, author) = {
                         let state = book_state.read();
                         (
@@ -73,16 +127,14 @@ pub fn EpubReader() -> Element {
                     };
                     
                     let mut state = app_state.write();
-                    if !state.library.iter().any(|b| b.path == file_path) {
+                    if (!state.library.iter().any(|b| b.path == file_path)) {
                         state.add_to_library(
                             file_path.clone(),
                             title,
                             author,
-                            saved_chapter.unwrap_or(0)
+                            chapter
                         );
                     }
-                    
-                    current_chapter.set(saved_chapter.unwrap_or(0));
                 }
                 Err(e) => load_error.set(Some(e.to_string())),
             }
@@ -94,22 +146,21 @@ pub fn EpubReader() -> Element {
         book_state.read().metadata.chapter_count
     });
 
+    // 修改go_next和go_prev以添加更多安全检查
     let go_next = move |_| {
-        let new_chapter = *current_chapter.read() + 1;
-        if new_chapter < book_state.read().metadata.chapter_count {
-            goto_chapter(
-                new_chapter
-            );
+        let current = *spine_index.read();
+        let max_spine = book_state.read().content.spine.len();
+        
+        if current < max_spine.saturating_sub(1) {
+            set_chapter_by_spine(current + 1);
         }
     };
 
     let go_prev = move |_| {
-
-        let new_chapter = *current_chapter.read() - 1;
-        if new_chapter > 0 {
-            goto_chapter(
-                new_chapter
-            );
+        let current = *spine_index.read();
+        let new_spine = current.saturating_sub(1);
+        if new_spine < current {
+            set_chapter_by_spine(new_spine);
         }
     };
 
@@ -168,21 +219,22 @@ pub fn EpubReader() -> Element {
                 if let Some(error) = load_error.read().as_ref() {
                     div { class: "text-red-500", "{error}" }
                 } else {
-                    content_view{current_chapter}
+                    content_view {
+                        content: chapter_content.read().clone(),
+                    }
                 }
                 // 导航按钮
                 div { class: "flex justify-center space-x-4",
                     button {
                         class: "px-4 py-2 bg-gray-300 rounded disabled:opacity-50",
-                        disabled: *current_chapter.read() == 0,
+                        disabled: *spine_index.read() == 0,
                         onclick: go_prev,
                         "上一章"
                     }
                     button {
                         class: "px-4 py-2 bg-gray-300 rounded disabled:opacity-50",
-                        disabled: *current_chapter.read() >= total_chapters.read().saturating_sub(1),
+                        disabled: *spine_index.read() >= book_state.read().content.spine.len().saturating_sub(1),
                         onclick: go_next,
-
                         "下一章"
                     }
                 }
@@ -190,22 +242,13 @@ pub fn EpubReader() -> Element {
         }
     }
 }
-
 #[component]
-pub fn content_view(current_chapter: Signal<usize>) -> Element {
-    let mut book_state = use_context::<Signal<BookState>>();
-    let chapter_content = use_memo(move || {
-        book_state.write().get_chapter(*current_chapter.read()).content
-    });
-
+pub fn content_view(props: ContentViewProps) -> Element {
     rsx! {
         div {
             class: "flex-1 p-8 overflow-y-auto bg-white text-gray-800 h-full relative",
-            style: "z-index: 1",
-            div {
-                dangerous_inner_html: "{chapter_content}",
-                style: "img {{ max-width: 100%; height: auto; display: block; margin: 1em auto; }}"
-            }
+            dangerous_inner_html: "{props.content}",
+            style: "img {{ max-width: 100%; height: auto; display: block; margin: 1em auto; }}"
         }
     }
 }
