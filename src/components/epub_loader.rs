@@ -29,6 +29,7 @@ pub struct BookMetadata {
     pub chapter_count: usize,
     pub order_path: HashMap<usize, PathBuf>,
     pub spine_to_order: HashMap<usize, usize>,  // Add this field
+    pub order_to_spine: HashMap<usize, usize>,  // Add this field
 }
 
 impl From<&BookContent> for BookMetadata {
@@ -42,6 +43,7 @@ impl From<&BookContent> for BookMetadata {
             chapter_count: content.spine.len(),
             order_path: content.order_path.clone(),
             spine_to_order: content.spine_to_order.clone(),
+            order_to_spine: content.order_to_spine.clone(),
         }
     }
 
@@ -68,6 +70,7 @@ impl BookState {
                 chapter_count: 0,
                 order_path: HashMap::new(),
                 spine_to_order: HashMap::new(),
+                order_to_spine: HashMap::new(),
             },
             toc: Vec::new(),
             content: BookContent::empty(),
@@ -202,6 +205,7 @@ pub struct BookContent {
     pub cover_id: Option<String>,
     pub order_path: HashMap<usize, PathBuf>,
     pub spine_to_order: HashMap<usize, usize>,  // Add this field
+    pub order_to_spine: HashMap<usize, usize>,  // Add this field
 }
 
 impl BookContent {
@@ -220,6 +224,7 @@ impl BookContent {
             cover_id: None,
             order_path: HashMap::new(),
             spine_to_order: HashMap::new(),
+            order_to_spine: HashMap::new(),
         }
     }
 
@@ -255,29 +260,34 @@ impl BookContent {
         
         let mut order_path = HashMap::new();
         let mut spine_to_order = HashMap::new();
+        let mut order_to_spine = HashMap::new();
         
-        // Build the mapping between spine index and play_order
+        // First, store all order-path mappings
         for (play_order, path) in chapter_paths.iter() {
             order_path.insert(*play_order, path.clone());
+        }
+
+        // For each spine entry, find all possible play orders that reference it
+        for (spine_idx, spine_path) in doc.spine.iter().enumerate() {
+            let mut min_order = usize::MAX;
             
-            // Get clean path without anchor
-            let clean_path = path.to_str()
-                .unwrap_or("")
-                .split("#")
-                .next()
-                .unwrap_or("");
-                
-            // Find matching resource ID from resources map
-            if let Some((resource_id, _)) = doc.resources.iter()
-                .find(|(_, (res_path, _))| {
-                    res_path.to_str()
-                        .unwrap_or("")
-                        .contains(clean_path)
-                }) {
-                // Find this resource ID in spine
-                if let Some(spine_idx) = doc.spine.iter().position(|id| id == resource_id) {
-                    spine_to_order.insert(spine_idx, *play_order);
+            // Find all play orders that reference this spine entry
+            for (play_order, path) in chapter_paths.iter() {
+                if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                    let clean_file_name = file_name.split("#").next().unwrap_or("");
+                    
+                    if clean_file_name == spine_path {
+                        // Keep track of the minimum play order for this spine index
+                        min_order = min_order.min(*play_order);
+                        // Map each play order to this spine index
+                        order_to_spine.insert(*play_order, spine_idx);
+                    }
                 }
+            }
+            
+            // Map spine index to the minimum play order that references it
+            if min_order != usize::MAX {
+                spine_to_order.insert(spine_idx, min_order);
             }
         }
 
@@ -293,18 +303,16 @@ impl BookContent {
             extra_css: doc.extra_css.clone(),
             unique_identifier: doc.unique_identifier.clone(),
             cover_id: doc.cover_id.clone(),
-            order_path: order_path,
+            order_path,
             spine_to_order,
+            order_to_spine,
         };
         
         Ok(content)
     }
 
     pub fn get_spine_index(&self, play_order: usize) -> Option<usize> {
-        self.spine_to_order
-            .iter()
-            .find(|(_spine_idx, &order)| order == play_order)
-            .map(|(&spine_idx, _)| spine_idx)
+        self.order_to_spine.get(&play_order).copied()
     }
 
 }
