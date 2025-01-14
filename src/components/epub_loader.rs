@@ -150,16 +150,38 @@ impl BookState {
     }
 
     pub fn get_chapter(&mut self, play_order: usize) -> Chapter {
-        // If no cached entry, fall back to doc and toc
         if let Some(path) = self.content.order_path.get(&play_order) {
             if let Some(ref mut doc) = self.doc {
-                let cleaned_path = path.to_str().unwrap_or("").split("#").next().unwrap_or("");
-                if let Some(content) = doc.get_resource_str_by_path(cleaned_path) {
-                    // 修改：将资源基础路径传递给处理函数
+                // 统一路径分隔符
+                let normalized_path = path.to_str()
+                    .unwrap_or("")
+                    .replace('\\', "/")
+                    .split('#')
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+
+                // 尝试多种路径格式
+                let content = doc.get_resource_str_by_path(&normalized_path)
+                    .or_else(|| {
+                        // 如果有 OEBPS 前缀，尝试去掉
+                        normalized_path.strip_prefix("OEBPS/")
+                            .and_then(|p| doc.get_resource_str_by_path(p))
+                    })
+                    .or_else(|| {
+                        // 尝试只用文件名
+                        Path::new(&normalized_path)
+                            .file_name()
+                            .and_then(|f| f.to_str())
+                            .and_then(|f| doc.get_resource_str_by_path(f))
+                    });
+
+                if let Some(content) = content {
+                    // ...process content and return chapter...
                     let processed_content = process_html_content(
-                        &content, 
+                        &content,
                         &doc.resources,
-                        &self.image_cache  // 传递图片缓存而不是root_base
+                        &self.image_cache
                     );
                     return Chapter {
                         id: path.display().to_string(),
@@ -254,6 +276,18 @@ impl BookContent {
         result
     }
 
+    fn normalize_path(path: &str) -> String {
+        // 1. 将所有路径分隔符统一为 '/'
+        // 2. 去除 OEBPS 前缀
+        // 3. 清理锚点
+        path.replace('\\', "/")
+            .trim_start_matches("OEBPS/")
+            .split('#')
+            .next()
+            .unwrap_or("")
+            .to_string()
+    }
+
     fn from_epub<R: Read + Seek>(mut doc: EpubDoc<R>) -> Result<Self, Box<dyn std::error::Error>> {
         let resource_content = Self::read_all_resources(&mut doc);
         let chapter_paths: Vec<(usize, PathBuf)> = Self::expand_toc(doc.toc.clone());
@@ -262,32 +296,36 @@ impl BookContent {
         let mut spine_to_order = HashMap::new();
         let mut order_to_spine = HashMap::new();
         
-        // First, store all order-path mappings
+        // Store all order-path mappings
         for (play_order, path) in chapter_paths.iter() {
             order_path.insert(*play_order, path.clone());
         }
 
-        // For each spine entry, find all possible play orders that reference it
-        for (spine_idx, spine_path) in doc.spine.iter().enumerate() {
-            let mut min_order = usize::MAX;
-            
-            // Find all play orders that reference this spine entry
-            for (play_order, path) in chapter_paths.iter() {
-                if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                    let clean_file_name = file_name.split("#").next().unwrap_or("");
+        // Map each spine entry to order
+        for (spine_idx, spine_id) in doc.spine.iter().enumerate() {
+            // Get the full path for this spine ID from resources
+            if let Some((spine_path, _)) = doc.resources.get(spine_id) {
+                let mut min_order = usize::MAX;
+                let normalized_spine = Self::normalize_path(
+                    spine_path.to_str().unwrap_or("")
+                );
+                
+                // Find orders that reference this spine path
+                for (play_order, order_path) in chapter_paths.iter() {
+                    let normalized_order = Self::normalize_path(
+                        order_path.to_str().unwrap_or("")
+                    );
                     
-                    if clean_file_name == spine_path {
-                        // Keep track of the minimum play order for this spine index
+                    // Compare normalized paths
+                    if normalized_spine == normalized_order {
                         min_order = min_order.min(*play_order);
-                        // Map each play order to this spine index
                         order_to_spine.insert(*play_order, spine_idx);
                     }
                 }
-            }
-            
-            // Map spine index to the minimum play order that references it
-            if min_order != usize::MAX {
-                spine_to_order.insert(spine_idx, min_order);
+                
+                if min_order != usize::MAX {
+                    spine_to_order.insert(spine_idx, min_order);
+                }
             }
         }
 
