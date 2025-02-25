@@ -15,19 +15,20 @@ pub struct TocItemProps {
     depth: usize,
     parent_idx: usize,
     item_idx: usize,
-    collapsed_nodes: Signal<HashSet<String>>, // replace is_collapsed: bool with the signal
+    collapsed_nodes: Signal<HashSet<String>>,
     on_toggle: EventHandler<String>,
     on_select: EventHandler<usize>,
 }
 
-#[derive(Props, PartialEq, Clone)]
-pub struct TocChildrenProps {
-    pub nav_points: Vec<NavPoint>, // renamed from "children"
-    pub depth: usize,
-    pub parent_idx: usize,
-    pub on_toggle: EventHandler<String>,
-    pub on_select: EventHandler<usize>,
-    pub collapsed_nodes: Signal<HashSet<String>>, // replace bool with the signal
+// 新增一个扁平化的目录项结构，用于优化渲染
+#[derive(Clone, Debug, PartialEq)]
+struct FlatTocItem {
+    label: String,
+    play_order: usize,
+    path: String,
+    depth: usize,
+    has_children: bool,
+    node_id: String,
 }
 
 #[component(memoize = true)]
@@ -36,9 +37,15 @@ fn TocItem(props: TocItemProps) -> Element {
     let node_id = format!("{}-{}", props.parent_idx, props.item_idx);
     let has_children = !props.entry.children.is_empty();
 
-    let is_collapsed = props.collapsed_nodes.read().contains(&node_id);
-    let chapter_index = props.entry.play_order.saturating_sub(1);
+    // 使用 use_memo 缓存折叠状态，减少不必要的计算
+    let node_id_for_memo = node_id.clone();
+    let is_collapsed = use_memo(move || {
+        props.collapsed_nodes.read().contains(&node_id_for_memo)
+    });
     
+    let chapter_index = props.entry.play_order;
+    
+    // 缓存当前选中状态的样式
     let class_name = use_memo(move || {
         if props.entry.play_order == *current_chapter.read() {
             "flex-1 cursor-pointer text-left py-1 text-blue-700 font-bold"
@@ -47,6 +54,12 @@ fn TocItem(props: TocItemProps) -> Element {
         }
     });
 
+    // 避免在渲染时创建闭包，预先构建
+    let toggle_id = node_id.clone();
+    let toggle_handler = move |_| props.on_toggle.call(toggle_id.clone());
+    
+    let select_handler = move |_| props.on_select.call(props.entry.play_order);
+
     rsx! {
         div {
             class: "flex flex-col",
@@ -54,17 +67,17 @@ fn TocItem(props: TocItemProps) -> Element {
                 class: "flex items-center gap-1 hover:bg-gray-200 rounded",
                 style: "padding-left: {props.depth * 16}px",
                 
-                // Collapse button
+                // 折叠按钮
                 div {
                     class: "w-4 h-4 flex items-center justify-center",
                     {if has_children {
                         rsx! {
                             button {
                                 class: "text-gray-500 hover:text-gray-700 focus:outline-none",
-                                onclick: move |_| props.on_toggle.call(node_id.clone()),
+                                onclick: toggle_handler,
                                 span {
                                     class: "transform transition-transform duration-200",
-                                    if is_collapsed { "▶" } else { "▼" },
+                                    if *is_collapsed.read() { "▶" } else { "▼" },
                                 }
                             }
                         }
@@ -77,18 +90,16 @@ fn TocItem(props: TocItemProps) -> Element {
                     }}
                 }
                 
-                // Label
+                // 标签
                 div {
                     class: "{class_name}",
-                    onclick: move |_| { 
-                        props.on_select.call(props.entry.play_order);
-                    },
+                    onclick: select_handler,
                     "{props.entry.label}"
                 }
             }
 
-            // Children
-            {(!is_collapsed && has_children).then(|| rsx!(
+            // 子目录 - 只在需要时渲染
+            {(!*is_collapsed.read() && has_children).then(|| rsx!(
                 TocChildren {
                     nav_points: props.entry.children.clone(),
                     depth: props.depth + 1,
@@ -102,20 +113,37 @@ fn TocItem(props: TocItemProps) -> Element {
     }
 }
 
+#[derive(Props, PartialEq, Clone)]
+pub struct TocChildrenProps {
+    pub nav_points: Vec<NavPoint>,
+    pub depth: usize,
+    pub parent_idx: usize,
+    pub on_toggle: EventHandler<String>,
+    pub on_select: EventHandler<usize>,
+    pub collapsed_nodes: Signal<HashSet<String>>,
+}
+
 #[component(memoize = true)]
 fn TocChildren(props: TocChildrenProps) -> Element {
+    // 使用 use_memo 预处理子项，避免在渲染循环中频繁计算
+    let children_items = use_memo(move || {
+        props.nav_points.iter().enumerate().map(|(idx, child)| {
+            let node_id = format!("{}-{}", props.parent_idx, idx);
+            (idx, node_id, child.clone())
+        }).collect::<Vec<_>>()
+    });
+
     rsx! {
         div {
             class: "flex flex-col",
-            {props.nav_points.iter().enumerate().map(|(idx, child)| {
-                let node_id = format!("{}-{}", props.parent_idx, idx);
+            {children_items.read().iter().map(|(idx, node_id, child)| {
                 rsx!(
                     TocItem {
                         key: "{node_id}",
                         entry: child.clone(),
                         depth: props.depth,
                         parent_idx: props.parent_idx,
-                        item_idx: idx,
+                        item_idx: *idx,
                         collapsed_nodes: props.collapsed_nodes.clone(),
                         on_toggle: props.on_toggle.clone(),
                         on_select: props.on_select.clone(),
@@ -131,8 +159,18 @@ pub fn TableOfContents(props: TableOfContentsProps) -> Element {
     let book_state = use_context::<Signal<BookState>>();
     let mut collapsed_nodes = use_signal(|| HashSet::new());
     
+    // 优化：缓存目录数据，只有在书籍变化时才重新计算
     let toc_data = use_memo(move || book_state.read().toc.clone());
+    
+    // 预先转换顶级项
+    let root_items = use_memo(move || {
+        toc_data.read().iter().enumerate().map(|(idx, entry)| {
+            let node_id = format!("0-{}", idx);
+            (idx, node_id, entry.clone())
+        }).collect::<Vec<_>>()
+    });
 
+    // 优化：避免每次渲染时创建闭包
     let mut on_toggle = move |id: String| {
         let mut nodes = collapsed_nodes.write();
         if nodes.contains(&id) {
@@ -145,21 +183,25 @@ pub fn TableOfContents(props: TableOfContentsProps) -> Element {
     rsx! {
         div { 
             class: "flex flex-col gap-1 p-2 select-none",
-            {toc_data.read().iter().enumerate().map(|(idx, entry)| {
-                let node_id = format!("0-{}", idx);
-                rsx!(
-                    TocItem {
-                        key: "{node_id}",
-                        entry: entry.clone(),
-                        depth: 0,
-                        parent_idx: 0,
-                        item_idx: idx,
-                        collapsed_nodes: collapsed_nodes.clone(), // pass entire signal
-                        on_toggle: move |id| on_toggle(id),
-                        on_select: props.on_select.clone(),
-                    }
-                )
-            })}
+            
+            // 显示目录项 - 移除滚动设置
+            div {
+                // 删除 overflow-auto 和 max-height 限制
+                {root_items.read().iter().map(|(idx, node_id, entry)| {
+                    rsx!(
+                        TocItem {
+                            key: "{node_id}",
+                            entry: entry.clone(),
+                            depth: 0,
+                            parent_idx: 0,
+                            item_idx: *idx,
+                            collapsed_nodes: collapsed_nodes.clone(),
+                            on_toggle: move |id| on_toggle(id),
+                            on_select: props.on_select.clone(),
+                        }
+                    )
+                })}
+            }
         }
     }
 }
